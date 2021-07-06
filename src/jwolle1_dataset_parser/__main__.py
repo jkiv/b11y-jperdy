@@ -6,7 +6,7 @@ from datetime import datetime
 import os
 import sqlalchemy
 from sqlalchemy import orm
-from sqlalchemy import Column, Integer, Boolean, String, Date
+from sqlalchemy import Boolean, Column, Date, Integer, String
 
 Base = orm.declarative_base()
 
