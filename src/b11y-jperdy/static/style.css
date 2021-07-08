@@ -2,12 +2,22 @@
 @import url('https://fonts.googleapis.com/css2?family=Comic+Neue:wght@700&display=swap');
 
 body {
+    background-color: '';
+    margin-top: 60pt;
+}
+
+body.jperdy-active {
+    background-color: #060CE9;
+}
+
+#jperdy-container {
+    text-align: center;
+}
+
+#jperdy-text {
     font-size: 60pt;
     font-family: 'Lora', 'serif';
     font-weight: 600;
     color: #fff;
     text-shadow: 2px 2px 2px #000;
-    text-align: center;
-    background-color: #060CE9;
-    margin-top: 60pt;
 }
