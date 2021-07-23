@@ -1,7 +1,7 @@
 
 var jperdy = jperdy || {};
 
-(function(context, settings) {
+(function(context) {
 
     context.timeouts = context.timeouts || {};
     context.state    = context.state    || {};
