@@ -3,9 +3,9 @@ var jperdy = jperdy || {};
 
 (function(context, settings) {
 
-    context.timeouts = context.timeout || {};
-    context.state    = context.state   || {};
-    context.mqtt     = context.mqtt    || {};
+    context.timeouts = context.timeouts || {};
+    context.state    = context.state    || {};
+    context.mqtt     = context.mqtt     || {};
 
     context.CATEGORY_TIMEOUT_MS =  3000;
     context.VALUE_TIMEOUT_MS    =  2000;
