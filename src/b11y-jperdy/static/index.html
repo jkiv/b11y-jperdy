@@ -13,9 +13,21 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.js" type="text/javascript"></script>
     <script src="jperdy.js" type="text/javascript"></script>
     <script>
+        // Grab parameters from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const channel_name = urlParams.get('channel');
+
         // Initialize and connect
-        jperdy.mqtt.initialize('localhost', 15675, '/ws', 'b11y_jperdy');
-        jperdy.mqtt.connect('mqtt_anonymous', 'mqtt_anonymous', false);
+        if (channel_name === null) {
+            console.error('[jperdy] No channel specified. Use URL parameter channel= to specify a channel name.');
+        }
+        else {
+            jperdy.set_channel(channel_name);
+            
+            jperdy.mqtt.initialize('localhost', 15675, '/ws', 'b11y_jperdy');
+            jperdy.mqtt.connect('mqtt_anonymous', 'mqtt_anonymous', false);
+        }
+        
     </script>
 </body>
 </html>

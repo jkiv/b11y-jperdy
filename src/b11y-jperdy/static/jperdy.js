@@ -1,17 +1,20 @@
 
 var jperdy = jperdy || {};
 
-(function(context) {
+(function(context, channel) {
 
     context.timeouts = context.timeouts || {};
     context.state    = context.state    || {};
     context.mqtt     = context.mqtt     || {};
 
-    context.CATEGORY_TIMEOUT_MS =  3000;
-    context.VALUE_TIMEOUT_MS    =  2000;
-    context.ANSWER_TIMEOUT_MS   = 30000;
-    context.QUESTION_TIMEOUT_MS =  5000;
-    context.WINNER_TIMEOUT_MS   =  5000;
+    context.channel_name = null;
+
+    context.CATEGORY_TIMEOUT_MS     =  3000;
+    context.VALUE_TIMEOUT_MS        =  2000;
+    context.ANSWER_TIMEOUT_MS       = 30000;
+    context.QUESTION_TIMEOUT_MS     =  5000;
+    context.WINNER_TIMEOUT_MS       =  5000;
+    context.WINNER_TOTAL_TIMEOUT_MS =  5000;
 
     context.RANDOM_QUESTION_URI = 'http://localhost:5000/answer';
     context.PLAYER_POINTS_URI   = 'http://localhost:5000/score/{{channel}}/{{player}}'
@@ -74,6 +77,7 @@ var jperdy = jperdy || {};
                 case 'b11y/j/start_round':
                     // Unpack payload
                     payload = JSON.parse(payload);
+
                     channel = payload.channel;
                     username = payload.username;
 
@@ -93,6 +97,7 @@ var jperdy = jperdy || {};
                 case 'b11y/j/guess':
                     // Unpack payload
                     payload = JSON.parse(payload);
+
                     channel = payload.channel;
                     username = payload.username;
                     guess = payload.guess;
@@ -143,6 +148,10 @@ var jperdy = jperdy || {};
         }
     }
 
+    context.set_channel = function(channel_name) {
+        context.channel_name = channel_name
+    };
+
     context.reset_game_state = function() {
         // Clear the screen
         console.log("[jperdy] Resetting game state to IDLE...");
@@ -161,9 +170,17 @@ var jperdy = jperdy || {};
 
     context.start_round = function(channel, username) {
         
-        // TODO if not IDLE state, return
+        if (channel != context.channel_name) {
+            console.log("[jperdy] Ignoring message for channel '" + channel + "'");
+            return;
+        }
 
-        console.log("[jperdy] Round initiated by '" + username + "' in '" + channel + "'.");
+        if (context.state != context.states.IDLE) {
+            console.log("[jperdy] Cannot start round while round in progress...");
+            return;
+        }
+
+        console.log("[jperdy] Round initiated by '" + username + "' in '" + channel + "'");
 
         // Save the round state
         context.round_info = {
@@ -202,7 +219,9 @@ var jperdy = jperdy || {};
                 context._set_game_text(answer.category);
 
                 // Send MQTT response
-                context.mqtt.send('b11y/j/round_start', ''); // TODO
+                // FUTURE choose what to send over
+                payload = { channel: channel, answer: answer };
+                context.mqtt.send('b11y/j/round_start', JSON.stringify(payload));
 
                 // Start timeout
                 return new Promise((resolve, reject) => {
@@ -252,7 +271,11 @@ var jperdy = jperdy || {};
         context.state = context.states.QUESTION_TIMEOUT;
 
         // Kick of MQTT message
-        context.mqtt.send('b11y/j/round_end', ''); // TODO
+        context.mqtt.send('b11y/j/round_end', JSON.stringify({
+            channel: channel,
+            username: '',
+            answer: context.round_info.answer,
+        }));
 
         (function() {
             // Show message
@@ -271,7 +294,6 @@ var jperdy = jperdy || {};
             context.reset_game_state();
         });
     }
-
 
     context.on_guess = function(channel, username, guess) {
 
@@ -295,7 +317,11 @@ var jperdy = jperdy || {};
         context.state = context.states.CORRECT_GUESS;
 
         // Kick of MQTT message
-        context.mqtt.send('b11y/j/round_end', ''); // TODO
+        context.mqtt.send('b11y/j/round_end', JSON.stringify({
+            channel: channel,
+            username: username,
+            answer: context.round_info.answer,
+        }));
 
         // Stop answer/question timeout
         clearTimeout(context.timeouts.answer);
@@ -313,14 +339,60 @@ var jperdy = jperdy || {};
             });
         })()
             .then(() => {
-                // Show winner
+                // Show winner and new total
                 console.log("[jperdy] Showing winner, '" + username + "'");
                 context._set_game_text(username);
 
                 return new Promise((resolve, reject) => {
                     setTimeout(() => {
-                    resolve();
+                        resolve();
                     }, context.WINNER_TIMEOUT_MS);
+                });
+            })
+            .then(() => {
+                // Update player total in channel, returns new player total
+
+                uri = context.PLAYER_POINTS_URI
+                uri = uri.replace('{{channel}}', encodeURI(channel));
+                uri = uri.replace('{{player}}', encodeURI(username));
+                
+                payload = {
+                    amount: context.round_info.answer.value
+                };
+
+                return fetch(uri, {
+                    method: 'PUT',
+                    //mode: 'cors', // no-cors, *cors, same-origin
+                    //credentials: 'same-origin', // include, *same-origin, omit
+                    cache: 'no-cache',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+            })
+            .then(response => {
+                console.log(response);
+
+                // Check response status
+                if (!response.ok) {
+                    console.log('[jperdy] Could not update points for player.', reponse);
+                }
+
+                return response.text();
+            })
+            .then(response_body => {
+                response = JSON.parse(response_body);
+                // { total: new_total }
+
+                // Show winner and new total
+                console.log("[jperdy] Showing winner's new total, $" + response.total + "'");
+                context._set_game_text('$' + response.total);
+
+                return new Promise((resolve, reject) => {
+                    setTimeout(() => {
+                        resolve();
+                    }, context.WINNER_TOTAL_TIMEOUT_MS);
                 });
             })
             .then(context.reset_game_state)
