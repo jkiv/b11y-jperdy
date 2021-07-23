@@ -2,7 +2,8 @@
 
 import argparse
 import flask
-from flask import jsonify
+import json
+from flask import jsonify, request
 from flask_cors import CORS, cross_origin
 import flask_sqlalchemy
 from flask_marshmallow import Marshmallow
@@ -16,6 +17,19 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///jeopardy_jwolle1.sqlite3'
 db = flask_sqlalchemy.SQLAlchemy(app)
 ma = Marshmallow(app)
 cors = CORS(app)
+
+class Score(db.Model):
+    __tablename__ = 'score'
+
+    channel = Column(String, primary_key=True)
+    player = Column(String, primary_key=True)
+    score = Column(Integer)
+
+class ScoreSchema(ma.Schema):
+    class Meta:
+        fields = ('channel', 'player', 'score')
+
+score_schema = ScoreSchema()
 
 class Answer(db.Model):
     __tablename__ = 'answers'
@@ -87,16 +101,32 @@ def hide_answer(id):
     else:
         return 'No answer for provided `id`.', 404
 
-@app.route('/<channel>/<player>/<points>', methods=['PUT'])
+@app.route('/score/<channel>/<player>', methods=['PUT'])
 @cross_origin()
-def add_player_points(channel, player, points):
-    # TODO
-    return '', 501
+def update_player_score(channel, player):
 
-@app.route('/<channel>/<player>/<points>', methods=['DELETE'])
-def remove_player_points(points):
-    # TODO
-    return '', 501
+    # Get points delta from JSON payload
+    payload = json.loads(request.data)
+    # TODO what to do with payload['channel'], payload['points']
+    amount = int(payload['amount'])
+
+    # Find player's current total
+    player_total = Score.query.filter_by(channel=channel, player=player).first()
+
+    if player_total is not None:
+        # Update player_total
+        player_total.score += amount
+    else:
+        # Create player_total
+        player_total = Score()
+        player_total.channel = channel
+        player_total.player = player
+        player_total.score = amount
+    
+    db.session.add(player_total)
+    db.session.commit()
+
+    return score_schema.dump(player_total)
 
 if __name__ == '__main__':
     # Make rocket go now!
