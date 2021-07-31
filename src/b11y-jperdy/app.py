@@ -19,7 +19,7 @@ ma = Marshmallow(app)
 cors = CORS(app)
 
 class Score(db.Model):
-    __tablename__ = 'score'
+    __tablename__ = 'scores'
 
     channel = Column(String, primary_key=True)
     player = Column(String, primary_key=True)
@@ -128,6 +128,6 @@ def update_player_score(channel, player):
 
     return score_schema.dump(player_total)
 
-if __name__ == '__main__':
-    # Make rocket go now!
-    app.run()
+# Create database tables for all models...
+db.create_all()
+db.session.commit()

@@ -1,7 +1,7 @@
 
 var jperdy = jperdy || {};
 
-(function(context, channel) {
+(function(context) {
 
     context.timeouts = context.timeouts || {};
     context.state    = context.state    || {};
@@ -16,8 +16,18 @@ var jperdy = jperdy || {};
     context.WINNER_TIMEOUT_MS       =  5000;
     context.WINNER_TOTAL_TIMEOUT_MS =  5000;
 
+    // FIXME specify the base URL
     context.RANDOM_QUESTION_URI = 'http://localhost:5000/answer';
     context.PLAYER_POINTS_URI   = 'http://localhost:5000/score/{{channel}}/{{player}}'
+
+    context.TOPIC_ALL           = '{{prefix}}/j/{{channel}}/*';
+    context.TOPIC_START_ROUND   = '{{prefix}}/j/{{channel}}/start_round';
+    context.TOPIC_ROUND_STARTED = '{{prefix}}/j/{{channel}}/round_started';
+    context.TOPIC_GUESS         = '{{prefix}}/j/{{channel}}/guess';
+    context.TOPIC_END_ROUND     = '{{prefix}}/j/{{channel}}/end_round';
+
+    context.topic_prefix = 'b11y';
+    context.topics = {};
 
     context.mqtt.initialize = function(hostname, port, server_path, client_id) {
         context.mqtt.client = new Paho.MQTT.Client(hostname, port, server_path, client_id);
@@ -26,10 +36,17 @@ var jperdy = jperdy || {};
 
     context.mqtt.on_connect = function() {
         console.log("[jperdy] MQTT connected.");
-        context.mqtt.subscribe("b11y/j/*");
+
+        if (context.topics.all === undefined) {
+            console.error("[jperdy] No channel name set. Could not subscribe to channel messages.");
+            return;
+        }
+
+        context.mqtt.subscribe(context.topics.all);
     }
 
     context.mqtt.on_disconnect = function(responseObject) {
+        // FIXME not used?
         console.log("[jperdy] MQTT disconnected... (" + responseObject.errorMessage + ")");
 
         // Reconnect
@@ -61,12 +78,16 @@ var jperdy = jperdy || {};
         context.mqtt.client.subscribe(topic);
     }
 
-    context.mqtt.send = function(topic, message) {
-        // TODO
+    context.mqtt.send = function(topic, payload) {
+        message = new Paho.MQTT.Message(payload);
+        message.destinationName = topic;
+        context.mqtt.client.send(message);
     }
 
     context.mqtt.on_message = function(message) {
         console.log('[jperdy] MQTT message received: topic=' + message.destinationName + ', payload=' + message.payloadString);
+
+        // TODO move these functions out of here
 
         // Handle messages in IDLE state
         handle_idle = function(message) {
@@ -74,7 +95,7 @@ var jperdy = jperdy || {};
             payload = message.payloadString;
 
             switch(topic) {
-                case 'b11y/j/start_round':
+                case context.topics.start_round:
                     // Unpack payload
                     payload = JSON.parse(payload);
 
@@ -94,7 +115,7 @@ var jperdy = jperdy || {};
             payload = message.payloadString;
 
             switch(topic) {
-                case 'b11y/j/guess':
+                case context.topics.guess:
                     // Unpack payload
                     payload = JSON.parse(payload);
 
@@ -113,16 +134,21 @@ var jperdy = jperdy || {};
 
         console.log('[jperdy] Current state: ' + context.state);
 
-        switch(context.state)
-        {
-            case context.states.IDLE:
-                handle_idle(message);
-                break;
-            case context.states.ACCEPTING_QUESTIONS:
-                handle_accepting_questions(message);
-                break;
-            default:
-                // (do nothing)
+        try {
+            switch(context.state)
+            {
+                case context.states.IDLE:
+                    handle_idle(message);
+                    break;
+                case context.states.ACCEPTING_QUESTIONS:
+                    handle_accepting_questions(message);
+                    break;
+                default:
+                    // (do nothing)
+            }
+        }
+        catch(e) {
+            console.error("[jperdy] Error while handling MQTT message received.", e);
         }
 
     }
@@ -148,9 +174,27 @@ var jperdy = jperdy || {};
         }
     }
 
+    context._update_topics = function(channel_name) {
+        
+        const prefix = context.topic_prefix;
+
+        context.topics = {
+            all:           context.TOPIC_ALL.replace(/{{prefix}}/g, prefix).replace(/{{channel}}/g, channel_name),
+            start_round:   context.TOPIC_START_ROUND.replace(/{{prefix}}/g, prefix).replace(/{{channel}}/g, channel_name),
+            round_started: context.TOPIC_ROUND_STARTED.replace(/{{prefix}}/g, prefix).replace(/{{channel}}/g, channel_name),
+            guess:         context.TOPIC_GUESS.replace(/{{prefix}}/g, prefix).replace(/{{channel}}/g, channel_name),
+            end_round:     context.TOPIC_END_ROUND.replace(/{{prefix}}/g, prefix).replace(/{{channel}}/g, channel_name)
+        }
+    }
+
     context.set_channel = function(channel_name) {
-        context.channel_name = channel_name
-    };
+        context.channel_name = channel_name;
+        context._update_topics(channel_name);
+    }
+
+    context.set_topic_prefix = function(topic_prefix) {
+        context.topic_prefix = topic_prefix;
+    }
 
     context.reset_game_state = function() {
         // Clear the screen
@@ -221,7 +265,7 @@ var jperdy = jperdy || {};
                 // Send MQTT response
                 // FUTURE choose what to send over
                 payload = { channel: channel, answer: answer };
-                context.mqtt.send('b11y/j/round_start', JSON.stringify(payload));
+                context.mqtt.send(context.topics.round_started, JSON.stringify(payload));
 
                 // Start timeout
                 return new Promise((resolve, reject) => {
@@ -271,7 +315,7 @@ var jperdy = jperdy || {};
         context.state = context.states.QUESTION_TIMEOUT;
 
         // Kick of MQTT message
-        context.mqtt.send('b11y/j/round_end', JSON.stringify({
+        context.mqtt.send(context.topics.end_round, JSON.stringify({
             channel: channel,
             username: '',
             answer: context.round_info.answer,
@@ -299,12 +343,12 @@ var jperdy = jperdy || {};
 
         // TODO Fair, fuzzy matching
         is_guess_close_enough = function(guess, question) {
-            guess = guess.replace(/[^a-zA-Z0-9]/g, '');
-            question = question.replace(/[^a-zA-Z0-9]/g, '');
+            guess = guess.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+            question = question.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 
             console.log("[jperdy] Checking guess = '" + guess + "' against question = '" + question + "'");
 
-            return (guess == question);
+            return (guess === question);
         }
 
         // Test `guess` against `question_cleaned`
@@ -315,13 +359,6 @@ var jperdy = jperdy || {};
 
         // Correct guess
         context.state = context.states.CORRECT_GUESS;
-
-        // Kick of MQTT message
-        context.mqtt.send('b11y/j/round_end', JSON.stringify({
-            channel: channel,
-            username: username,
-            answer: context.round_info.answer,
-        }));
 
         // Stop answer/question timeout
         clearTimeout(context.timeouts.answer);
@@ -372,22 +409,27 @@ var jperdy = jperdy || {};
                 });
             })
             .then(response => {
-                console.log(response);
 
                 // Check response status
                 if (!response.ok) {
                     console.log('[jperdy] Could not update points for player.', reponse);
                 }
 
-                return response.text();
+                return response.json();
             })
-            .then(response_body => {
-                response = JSON.parse(response_body);
-                // { total: new_total }
+            .then(response => {
 
                 // Show winner and new total
-                console.log("[jperdy] Showing winner's new total, $" + response.total + "'");
-                context._set_game_text('$' + response.total);
+                console.log("[jperdy] Showing winner's new total, $" + response.score + "'");
+                context._set_game_text('$' + response.score);
+
+                // Kick of MQTT message
+                context.mqtt.send(context.topics.end_round, JSON.stringify({
+                    channel: channel,
+                    username: username,
+                    score: '$' + response.score,
+                    answer: context.round_info.answer,
+                }));
 
                 return new Promise((resolve, reject) => {
                     setTimeout(() => {
@@ -395,7 +437,9 @@ var jperdy = jperdy || {};
                     }, context.WINNER_TOTAL_TIMEOUT_MS);
                 });
             })
-            .then(context.reset_game_state)
+            .then(() => {
+                context.reset_game_state();
+            })
             .catch(error => {
                 console.error("[jperdy] Error while handling round end.", error);
                 context.reset_game_state();

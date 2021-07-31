@@ -15,13 +15,19 @@
     <script>
         // Grab parameters from URL
         const urlParams = new URLSearchParams(window.location.search);
-        const channel_name = urlParams.get('channel');
+        const channel_name = urlParams.get('channel');      // required
+        const topic_prefix = urlParams.get('topic_prefix'); // optional
 
         // Initialize and connect
         if (channel_name === null) {
             console.error('[jperdy] No channel specified. Use URL parameter channel= to specify a channel name.');
         }
         else {
+
+            if (topic_prefix !== null) {
+                jperdy.set_topic_prefix(topic_prefix);
+            }
+
             jperdy.set_channel(channel_name);
             
             jperdy.mqtt.initialize('localhost', 15675, '/ws', 'b11y_jperdy');
